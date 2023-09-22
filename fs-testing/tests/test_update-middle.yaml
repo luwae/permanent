@@ -1,0 +1,4 @@
+# update part of file
+trace_cmd_suffix: 'checkpoint 0 && for i in `seq 71` ; do printf MjOf1E3x18E3R5EP6hq7WjzALMtjsAXY ; done > /mnt/myfile && sync && checkpoint 1 && echo -n hohoho | dd of=/mnt/myfile seek=171 bs=6 conv=notrunc && checkpoint 2 && sync && checkpoint 3'
+checkpoint_range: [0, 3]
+dump_cmd_suffix: "echo test >> /mnt/myfile && rm -r /mnt/*"

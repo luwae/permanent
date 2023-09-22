@@ -1,0 +1,312 @@
+diff --git a/hw/nvme/ctrl.c b/hw/nvme/ctrl.c
+index 90687b1..c80acc4 100644
+--- a/hw/nvme/ctrl.c
++++ b/hw/nvme/ctrl.c
+@@ -208,6 +208,7 @@
+ #include "nvme.h"
+ #include "dif.h"
+ #include "trace.h"
++#include "permanent_trace.h"
+ 
+ #define NVME_MAX_IOQPAIRS 0xffff
+ #define NVME_DB_SIZE  4
+@@ -1447,6 +1448,9 @@ static inline void nvme_blk_read(BlockBackend *blk, int64_t offset,
+     assert(req->sg.flags & NVME_SG_ALLOC);
+ 
+     if (req->sg.flags & NVME_SG_DMA) {
++        if (permanent_trace_funcs.pci_nvme_blk_read) {
++            permanent_trace_funcs.pci_nvme_blk_read((void*)req, offset);
++        }
+         req->aiocb = dma_blk_read(blk, &req->sg.qsg, offset, align, cb, req);
+     } else {
+         req->aiocb = blk_aio_preadv(blk, offset, &req->sg.iov, 0, cb, req);
+@@ -1460,6 +1464,9 @@ static inline void nvme_blk_write(BlockBackend *blk, int64_t offset,
+     assert(req->sg.flags & NVME_SG_ALLOC);
+ 
+     if (req->sg.flags & NVME_SG_DMA) {
++        if (permanent_trace_funcs.pci_nvme_blk_write) {
++            permanent_trace_funcs.pci_nvme_blk_write((void*)req, offset);
++        }
+         req->aiocb = dma_blk_write(blk, &req->sg.qsg, offset, align, cb, req);
+     } else {
+         req->aiocb = blk_aio_pwritev(blk, offset, &req->sg.iov, 0, cb, req);
+@@ -1538,6 +1545,10 @@ static void nvme_enqueue_req_completion(NvmeCQueue *cq, NvmeRequest *req)
+                                           le32_to_cpu(req->cqe.dw1),
+                                           req->status);
+ 
++    if (permanent_trace_funcs.pci_nvme_enqueue_req_completion) {
++        permanent_trace_funcs.pci_nvme_enqueue_req_completion((void*)req, req->status);
++    }
++
+     if (req->status) {
+         trace_pci_nvme_err_req_status(nvme_cid(req), nvme_nsid(req->ns),
+                                       req->status, req->cmd.opcode);
+@@ -3429,6 +3440,9 @@ static uint16_t nvme_read(NvmeCtrl *n, NvmeRequest *req)
+     }
+ 
+     trace_pci_nvme_read(nvme_cid(req), nvme_nsid(ns), nlb, mapped_size, slba);
++    if (permanent_trace_funcs.pci_nvme_read) {
++        permanent_trace_funcs.pci_nvme_read(nvme_cid(req), nvme_nsid(ns), nlb, mapped_size, slba);
++    }
+ 
+     status = nvme_check_mdts(n, mapped_size);
+     if (status) {
+@@ -3542,6 +3556,10 @@ static uint16_t nvme_do_write(NvmeCtrl *n, NvmeRequest *req, bool append,
+ 
+     trace_pci_nvme_write(nvme_cid(req), nvme_io_opc_str(rw->opcode),
+                          nvme_nsid(ns), nlb, mapped_size, slba);
++    if (permanent_trace_funcs.pci_nvme_write) {
++        permanent_trace_funcs.pci_nvme_write(nvme_cid(req), nvme_io_opc_str(rw->opcode),
++                         nvme_nsid(ns), nlb, mapped_size, slba);
++    }
+ 
+     if (!wrz) {
+         status = nvme_check_mdts(n, mapped_size);
+@@ -4412,6 +4430,10 @@ static uint16_t nvme_io_cmd(NvmeCtrl *n, NvmeRequest *req)
+ 
+     trace_pci_nvme_io_cmd(nvme_cid(req), nsid, nvme_sqid(req),
+                           req->cmd.opcode, nvme_io_opc_str(req->cmd.opcode));
++    if (permanent_trace_funcs.pci_nvme_io_cmd) {
++        permanent_trace_funcs.pci_nvme_io_cmd(nvme_cid(req), nsid, nvme_sqid(req),
++                          req->cmd.opcode, nvme_io_opc_str(req->cmd.opcode));
++    }
+ 
+     if (!nvme_nsid_valid(n, nsid)) {
+         return NVME_INVALID_NSID | NVME_DNR;
+diff --git a/include/qemu/qemu-plugin.h b/include/qemu/qemu-plugin.h
+index 50a9957..024653f 100644
+--- a/include/qemu/qemu-plugin.h
++++ b/include/qemu/qemu-plugin.h
+@@ -51,7 +51,7 @@ typedef uint64_t qemu_plugin_id_t;
+ 
+ extern QEMU_PLUGIN_EXPORT int qemu_plugin_version;
+ 
+-#define QEMU_PLUGIN_VERSION 1
++#define QEMU_PLUGIN_VERSION 2
+ 
+ /**
+  * struct qemu_info_t - system information for plugins
+@@ -664,4 +664,21 @@ uint64_t qemu_plugin_end_code(void);
+  */
+ uint64_t qemu_plugin_entry_code(void);
+ 
++/**
++ * qemu_plugin_vcpu_memory_rw() - reads or writes guest's virtual or physical memory
++ *
++ * @vcpu_index: vcpu index
++ * @addr: guest's address
++ * @buf: data buffer
++ * @len: number of bytes to transfer
++ * @is_write: whether to read from buf or write to buf
++ * @is_phys: whether to interpret addr as virtual or physical address
++ */
++void qemu_plugin_vcpu_memory_rw(unsigned int vcpu_index,
++                                    uint64_t addr,
++                                    void *buf,
++                                    uint64_t len,
++                                    bool is_write,
++                                    bool is_phys);
++
+ #endif /* QEMU_QEMU_PLUGIN_H */
+diff --git a/include/permanent_trace.h b/include/permanent_trace.h
+new file mode 100644
+index 0000000..d09813a
+--- /dev/null
++++ b/include/permanent_trace.h
+@@ -0,0 +1,23 @@
++#ifndef PERMANENT_TRACE_H
++#define PERMANENT_TRACE_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++struct permanent_trace_fn {
++    void (*pci_nvme_read)(uint16_t cid, uint32_t nsid, uint32_t nlb, uint64_t count, uint64_t lba);
++    void (*pci_nvme_write)(uint16_t cid, const char *verb, uint32_t nsid, uint32_t nlb, uint64_t count, uint64_t lba);
++    void (*pci_nvme_io_cmd)(uint16_t cid, uint32_t nsid, uint16_t sqid, uint8_t opcode, const char *opname);
++
++    void (*pci_nvme_blk_read)(const void *req, int64_t offset);
++    void (*pci_nvme_blk_write)(const void *req, int64_t offset);
++    void (*pci_nvme_enqueue_req_completion)(const void *req, uint16_t status);
++
++    void (*dma_blk_read)(const void *dbs, int64_t offset, int64_t bytes);
++    void (*dma_blk_write)(const void *dbs, int64_t offset, int64_t bytes, const void *buf);
++    void (*dma_blk_io)(const void *req, const void *dbs);
++};
++
++extern struct permanent_trace_fn permanent_trace_funcs;
++
++#endif
+diff --git a/plugins/api.c b/plugins/api.c
+index 2078b16..40efc4b 100644
+--- a/plugins/api.c
++++ b/plugins/api.c
+@@ -442,3 +442,26 @@ uint64_t qemu_plugin_entry_code(void)
+ #endif
+     return entry;
+ }
++
++void qemu_plugin_vcpu_memory_rw(unsigned int vcpu_index,
++                                    uint64_t addr,
++                                    void *buf,
++                                    uint64_t len,
++                                    bool is_write,
++                                    bool is_phys)
++{
++    CPUClass *cc;
++    CPUState *cpu;
++
++    cpu = qemu_get_cpu(vcpu_index);
++    cc = CPU_GET_CLASS(cpu);
++    if (is_phys) {
++        cpu_physical_memory_rw(addr, buf, len, is_write);
++    } else {
++        if (cc->memory_rw_debug) {
++            cc->memory_rw_debug(cpu, addr, buf, len, is_write);
++        } else {
++            cpu_memory_rw_debug(cpu, addr, buf, len, is_write);
++        }
++    }
++}
+diff --git a/plugins/loader.c b/plugins/loader.c
+index 809f3f9..9eecba3 100644
+--- a/plugins/loader.c
++++ b/plugins/loader.c
+@@ -34,6 +34,7 @@
+ #include "hw/boards.h"
+ #endif
+ #include "qemu/compiler.h"
++#include "permanent_trace.h"
+ 
+ #include "plugin.h"
+ 
+@@ -168,6 +169,9 @@ static uint64_t xorshift64star(uint64_t x)
+     return x * UINT64_C(2685821657736338717);
+ }
+ 
++// permanent_trace functions (public)
++struct permanent_trace_fn permanent_trace_funcs = {0};
++
+ /*
+  * Disable CFI checks.
+  * The install and version functions have been loaded from an external library
+@@ -255,6 +259,33 @@ static int plugin_load(struct qemu_plugin_desc *desc, const qemu_info_t *info, E
+         }
+     }
+ 
++    // check for permanent_trace plugin and set functions that are needed in QEMU itself (NVME, DMA, ...)
++    if (g_module_symbol(ctx->handle, "permanent_trace_version", &sym)) {
++        g_module_symbol(ctx->handle, "permanent_trace_pci_nvme_read", (gpointer*)&permanent_trace_funcs.pci_nvme_read);
++        g_module_symbol(ctx->handle, "permanent_trace_pci_nvme_write", (gpointer*)&permanent_trace_funcs.pci_nvme_write);
++        g_module_symbol(ctx->handle, "permanent_trace_pci_nvme_io_cmd", (gpointer*)&permanent_trace_funcs.pci_nvme_io_cmd);
++
++        g_module_symbol(ctx->handle, "permanent_trace_pci_nvme_blk_read", (gpointer*)&permanent_trace_funcs.pci_nvme_blk_read);
++        g_module_symbol(ctx->handle, "permanent_trace_pci_nvme_blk_write", (gpointer*)&permanent_trace_funcs.pci_nvme_blk_write);
++        g_module_symbol(ctx->handle, "permanent_trace_pci_nvme_enqueue_req_completion", (gpointer*)&permanent_trace_funcs.pci_nvme_enqueue_req_completion);
++
++        g_module_symbol(ctx->handle, "permanent_trace_dma_blk_read", (gpointer*)&permanent_trace_funcs.dma_blk_read);
++        g_module_symbol(ctx->handle, "permanent_trace_dma_blk_write", (gpointer*)&permanent_trace_funcs.dma_blk_write);
++        g_module_symbol(ctx->handle, "permanent_trace_dma_blk_io", (gpointer*)&permanent_trace_funcs.dma_blk_io);
++
++        g_assert_nonnull(permanent_trace_funcs.pci_nvme_read);
++        g_assert_nonnull(permanent_trace_funcs.pci_nvme_write);
++        g_assert_nonnull(permanent_trace_funcs.pci_nvme_io_cmd);
++
++        g_assert_nonnull(permanent_trace_funcs.pci_nvme_blk_read);
++        g_assert_nonnull(permanent_trace_funcs.pci_nvme_blk_write);
++        g_assert_nonnull(permanent_trace_funcs.pci_nvme_enqueue_req_completion);
++
++        g_assert_nonnull(permanent_trace_funcs.dma_blk_read);
++        g_assert_nonnull(permanent_trace_funcs.dma_blk_write);
++        g_assert_nonnull(permanent_trace_funcs.dma_blk_io);
++    }
++
+     qemu_rec_mutex_unlock(&plugin.lock);
+     return rc;
+ 
+diff --git a/plugins/qemu-plugins.symbols b/plugins/qemu-plugins.symbols
+index 71f6c90..3cdcd39 100644
+--- a/plugins/qemu-plugins.symbols
++++ b/plugins/qemu-plugins.symbols
+@@ -42,4 +42,5 @@
+   qemu_plugin_tb_vaddr;
+   qemu_plugin_uninstall;
+   qemu_plugin_vcpu_for_each;
++  qemu_plugin_vcpu_memory_rw;
+ };
+diff --git a/softmmu/dma-helpers.c b/softmmu/dma-helpers.c
+index 2463964..1cd1095 100644
+--- a/softmmu/dma-helpers.c
++++ b/softmmu/dma-helpers.c
+@@ -15,6 +15,7 @@
+ #include "qemu/main-loop.h"
+ #include "sysemu/cpu-timers.h"
+ #include "qemu/range.h"
++#include "permanent_trace.h"
+ 
+ /* #define DEBUG_IOMMU */
+ 
+@@ -228,6 +229,9 @@ BlockAIOCB *dma_blk_io(AioContext *ctx,
+     DMAAIOCB *dbs = qemu_aio_get(&dma_aiocb_info, NULL, cb, opaque);
+ 
+     trace_dma_blk_io(dbs, io_func_opaque, offset, (dir == DMA_DIRECTION_TO_DEVICE));
++    if (permanent_trace_funcs.dma_blk_io) {
++        permanent_trace_funcs.dma_blk_io(opaque, (void*)dbs);
++    }
+ 
+     dbs->acb = NULL;
+     dbs->sg = sg;
+@@ -252,6 +256,11 @@ BlockAIOCB *dma_blk_read_io_func(int64_t offset, QEMUIOVector *iov,
+                                  void *opaque)
+ {
+     BlockBackend *blk = opaque;
++
++    if (permanent_trace_funcs.dma_blk_read) {
++        permanent_trace_funcs.dma_blk_read(cb_opaque, offset, iov->iov->iov_len);
++    }
++
+     return blk_aio_preadv(blk, offset, iov, 0, cb, cb_opaque);
+ }
+ 
+@@ -270,6 +279,11 @@ BlockAIOCB *dma_blk_write_io_func(int64_t offset, QEMUIOVector *iov,
+                                   void *opaque)
+ {
+     BlockBackend *blk = opaque;
++
++    if (permanent_trace_funcs.dma_blk_write) {
++        permanent_trace_funcs.dma_blk_write(cb_opaque, offset, iov->iov->iov_len, iov->iov->iov_base);
++    }
++
+     return blk_aio_pwritev(blk, offset, iov, 0, cb, cb_opaque);
+ }
+ 
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index e0a6229..659d804 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -6656,7 +6656,11 @@ static bool disas_insn(DisasContext *s, CPUState *cpu)
+                 if (!(s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_CLWB)) {
+                     goto illegal_op;
+                 }
+-                gen_nop_modrm(env, s, modrm);
++                // load (and ignore) a single byte from memory, triggering a memory callback.
++                // only one byte because we don't want inter-cacheline reads
++                // value in s->T0 is ignored afterwards.
++                gen_lea_modrm(env, s, modrm);
++                gen_op_ld_v(s, MO_8, s->T0, s->A0);
+             } else {
+                 /* xsaveopt */
+                 if ((s->cpuid_ext_features & CPUID_EXT_XSAVE) == 0
+@@ -6687,7 +6691,11 @@ static bool disas_insn(DisasContext *s, CPUState *cpu)
+                     goto illegal_op;
+                 }
+             }
+-            gen_nop_modrm(env, s, modrm);
++            // load (and ignore) a single byte from memory, triggering a memory callback.
++            // only one byte because we don't want inter-cacheline reads
++            // value in s->T0 is ignored afterwards.
++            gen_lea_modrm(env, s, modrm);
++            gen_op_ld_v(s, MO_8, s->T0, s->A0);
+             break;
+ 
+         case 0xc0 ... 0xc7: /* rdfsbase (f3 0f ae /0) */

@@ -1,0 +1,15 @@
+[package]
+name = "permanent_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+permanent_common = { path = "../permanent_common" }
+
+crossbeam-channel = "0.5"
+lazy_static = "1.4"
+iced-x86 = { version = "1.19.0", default-features = false, features = ["std", "decoder", "intel"] }
+enumset = "1.1.2"

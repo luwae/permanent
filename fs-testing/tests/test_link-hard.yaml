@@ -1,0 +1,3 @@
+trace_cmd_suffix: "checkpoint 0 && echo -n test > /mnt/myfile && sync && checkpoint 1 && ln /mnt/myfile /mnt/hardlink && sync && checkpoint 2 && sleep 2 && rm /mnt/myfile && sync && checkpoint 3"
+checkpoint_range: [0, 3]
+dump_cmd_suffix: "echo test > /mnt/myfile && rm -r /mnt/*"

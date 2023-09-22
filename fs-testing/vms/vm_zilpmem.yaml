@@ -1,0 +1,12 @@
+fs_type: "hybrid"
+pmem_start: 536870912 # 512 * 2**20
+pmem_len:   134217728 # 128 * 2**20
+qemu_path: "qemu/build/qemu-system-x86_64"
+kernel_path: "fs-testing/zil-pmem/linux_build/arch/x86/boot/bzImage"
+initrd_path: "fs-testing/initramfs/initramfs_zilpmem.cpio.gz"
+qemu_args: [ "-m", "1G", "-append", "console=ttyS0,115200n8 memmap=128M!512M" ]
+trace_cmd_prefix: 'echo 1 > /proc/sys/kernel/printk && echo 1 > /sys/module/zfs/parameters/zfs_zil_pmem_prb_ncommitters && echo 2 > /sys/module/zfs/parameters/zil_default_kind && zpool create -O mountpoint=legacy testpool /dev/nvme0n1 log dax:/dev/pmem0 && mount -t zfs -o sync=always testpool /mnt'
+# Recovery: Import pool read-write to allow replay, then mount dataset read-only. 
+recovery_cmd: 'echo 1 > /proc/sys/kernel/printk && echo 1 > /sys/module/zfs/parameters/zfs_zil_pmem_prb_ncommitters && zpool import testpool && mount -t zfs -oro testpool /mnt && ls -lah /mnt && fs-dump --contents /mnt > /dev/null'
+# reduce linux console level to prevent garbage in the output
+dump_cmd_prefix: 'echo 1 > /proc/sys/kernel/printk && echo 1 > /sys/module/zfs/parameters/zfs_zil_pmem_prb_ncommitters && zpool import testpool && mount -t zfs -oro testpool /mnt && fs-dump --contents /mnt && umount /mnt && mount -t zfs testpool /mnt'

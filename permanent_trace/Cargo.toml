@@ -1,0 +1,13 @@
+[package]
+name = "permanent_trace"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+permanent_common = { path = "../permanent_common" }
+libc = "0.2.126"
+regex = "1.9.3"
+clap = { version="4.3.22", features=["derive"] }
+serde = "1.0.183"
+serde_yaml = "0.9.25"
+enumset = "1.1.2"

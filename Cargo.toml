@@ -1,0 +1,15 @@
+[workspace]
+members = [
+	"permanent_common",
+	"permanent_plugin",
+	"permanent_trace",
+	"permanent_cig",
+	"permanent_tester",
+]
+exclude = [
+	# Needs to be built with musl.
+	"fs-testing/fs-dump",
+]
+
+[profile.release]
+debug = true
