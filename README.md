@@ -30,7 +30,7 @@ make -C qemu/build -j$(nproc)
 
 ## Executing a test case
 
- - create a working directory including `vm_config.yaml` and `test_config.yaml
+ - create a working directory including `vm_config.yaml` and `test_config.yaml`
  - include `pmem_base.raw` or `nvme_base.raw` or both image files into the working directory, depending on the FS type. Usually these files are all zeroes with the respective size of the devices.
  - execute the pipeline stages. They are executed separately. Alternatively use `pipeline.sh {workdir}` which redirects the output of the pipeline stages into the working directory.
 
