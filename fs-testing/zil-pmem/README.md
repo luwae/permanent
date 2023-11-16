@@ -4,6 +4,11 @@ https://github.com/openzfs/zfs/pull/12731
 
 ## Building
 
+Install dependencies (tested on Fedora 38 (TODO build still fails)):
+```sh
+dnf install flex bison openssl-devel elfutils-libelf-devel autoconf automake sysconftool libuuid-devel libtirpc-devel
+```
+
 Clone ZFS (with ZIL-PMEM) into openzfs/ and a suitable Linux version into linux/ (e.g., 5.11).
 
 ```sh
@@ -11,6 +16,11 @@ Clone ZFS (with ZIL-PMEM) into openzfs/ and a suitable Linux version into linux/
 git clone -b zil-pmem/upstreaming https://github.com/problame/zfs/ openzfs
 # with some patches (e.g., smaller chunk size) to ease analysis
 git clone -b zil-pmem/vinter https://github.com/lluchs/zfs/ openzfs
+```
+
+Apply kernel patch:
+```sh
+pushd linux && patch -p1 < ../xrealloc.patch && popd
 ```
 
 Build the kernel:
