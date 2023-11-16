@@ -9,9 +9,9 @@ It is a combination of [Vinter](https://os.itec.kit.edu/65_3814.php) [(source)](
 # Rust via rustup (see https://rustup.rs)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add x86_64-unknown-linux-musl
+# other build dependencies
+dnf install ninja-build glib2-devel pixman-devel glibc-static
 
-# QEMU build dependencies
-dnf install ninja-build glib2-devel pixman-devel
 # get QEMU
 wget https://download.qemu.org/qemu-8.0.4.tar.xz
 tar xvJf qemu-8.0.4.tar.xz && mv qemu-8.0.4 qemu
